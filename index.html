@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Grimoire</title>
+    <title>Love Story Grimoire - Final Story</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
@@ -148,7 +148,13 @@
         <div style="font-size: 12px; color: #888;">Đang tải phép thuật...</div>
     </div>
 
-    
+    <div id="lock-overlay">
+        <canvas id="lock-canvas"></canvas>
+        <div id="guide-text">Draw 'N' to Unlock</div>
+        <div id="final-text">
+            <span style="font-size: 2em; font-weight: 400; transform: scaleY(1.4); display: inline-block; transform-origin: bottom;">N</span>A YÊU
+        </div>
+    </div>
 
     <div id="vignette"></div>
     <div id="noise"></div>
@@ -170,7 +176,157 @@
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
         import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 
-       
+        // ==========================================
+        // 🔒 MAGIC LOCK MODULE
+        // ==========================================
+        const MagicLock = {
+            config: {
+                smoothFactor: 0.15, orbitSpeed: 0.0003, pulseSpeed: 2, activePulseSpeed: 5,
+                colors: { primary: '#ffd700', dim: 'rgba(100, 100, 100, 0.4)', trailStart: 'rgba(255, 215, 0, 0)', trailEnd: 'rgba(255, 250, 220, 0.9)' }
+            },
+            isLocked: true,
+            isSequenceActive: false,
+            canvas: null, ctx: null,
+            // Points for 'N' shape
+            points: [ { x: 0.35, y: 0.75 }, { x: 0.35, y: 0.25 }, { x: 0.65, y: 0.75 }, { x: 0.65, y: 0.25 } ],
+            currentIndex: 0,
+            trail: [], particles: [], connectedPairs: [],
+            cursor: { x: 0, y: 0 }, target: { x: 0, y: 0 },
+
+            init() {
+                this.canvas = document.getElementById('lock-canvas');
+                if(!this.canvas) return;
+                this.ctx = this.canvas.getContext('2d');
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+                this.cursor.x = window.innerWidth / 2;
+                this.cursor.y = window.innerHeight / 2;
+            },
+            resize() {
+                if(this.canvas) { this.canvas.width = window.innerWidth; this.canvas.height = window.innerHeight; }
+            },
+            update(landmarks) {
+                if (!this.isLocked && !this.isSequenceActive) return;
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                const time = Date.now();
+                const rotationAngle = time * this.config.orbitSpeed;
+
+                if (landmarks && !this.isSequenceActive && this.isLocked) {
+                    const indexTip = landmarks[8];
+                    this.target.x = (1 - indexTip.x) * this.canvas.width;
+                    this.target.y = indexTip.y * this.canvas.height;
+                    this.cursor.x += (this.target.x - this.cursor.x) * this.config.smoothFactor;
+                    this.cursor.y += (this.target.y - this.cursor.y) * this.config.smoothFactor;
+                    this.trail.push({ x: this.cursor.x, y: this.cursor.y });
+                    if (this.trail.length > 25) this.trail.shift();
+                }
+
+                this.drawTrail(); this.drawParticles();
+                const realPoints = this.points.map(pt => this.getRotatedPoint(pt, rotationAngle));
+                this.drawConnections(realPoints);
+
+                realPoints.forEach((pos, idx) => {
+                    const isActive = idx < this.currentIndex || this.isSequenceActive;
+                    this.drawRune(pos.x, pos.y, isActive, time);
+                    if (!this.isSequenceActive && idx === this.currentIndex && this.isLocked) {
+                        const dist = Math.hypot(this.cursor.x - pos.x, this.cursor.y - pos.y);
+                        if (dist < 60) {
+                            this.spawnExplosion(pos.x, pos.y);
+                            if (this.currentIndex > 0) this.connectedPairs.push({ from: this.currentIndex - 1, to: this.currentIndex });
+                            this.currentIndex++;
+                            if (this.currentIndex >= this.points.length) this.triggerUnlock();
+                        }
+                    }
+                });
+            },
+            drawTrail() {
+                if (this.trail.length < 2) return;
+                const ctx = this.ctx; ctx.beginPath(); ctx.moveTo(this.trail[0].x, this.trail[0].y);
+                for (let i = 1; i < this.trail.length - 2; i++) {
+                    const xc = (this.trail[i].x + this.trail[i+1].x) / 2;
+                    const yc = (this.trail[i].y + this.trail[i+1].y) / 2;
+                    ctx.quadraticCurveTo(this.trail[i].x, this.trail[i].y, xc, yc);
+                }
+                ctx.quadraticCurveTo(this.trail[this.trail.length-2].x, this.trail[this.trail.length-2].y, this.trail[this.trail.length-1].x, this.trail[this.trail.length-1].y);
+                const grad = ctx.createLinearGradient(this.trail[0].x, this.trail[0].y, this.cursor.x, this.cursor.y);
+                grad.addColorStop(0, this.config.colors.trailStart); grad.addColorStop(1, this.config.colors.trailEnd);
+                ctx.strokeStyle = grad; ctx.lineWidth = 5; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
+            },
+            drawConnections(realPoints) {
+                const ctx = this.ctx;
+                this.connectedPairs.forEach(pair => {
+                    const p1 = realPoints[pair.from]; const p2 = realPoints[pair.to];
+                    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+                    ctx.strokeStyle = this.isSequenceActive ? '#ffd700' : 'rgba(255, 215, 0, 0.8)';
+                    ctx.lineWidth = this.isSequenceActive ? 5 : 3;
+                    if (this.isSequenceActive) { ctx.shadowBlur = 15; ctx.shadowColor = "#ffd700"; }
+                    ctx.stroke(); ctx.shadowBlur = 0;
+                });
+            },
+            drawRune(x, y, isActive, time) {
+                const ctx = this.ctx; const baseSize = isActive ? 22 : 15;
+                const color = isActive ? this.config.colors.primary : this.config.colors.dim;
+                const scale = 1 + Math.sin(time * 0.001 * (isActive ? this.config.activePulseSpeed : this.config.pulseSpeed)) * (isActive ? 0.15 : 0.08);
+                ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
+                if (isActive) { ctx.shadowBlur = 20; ctx.shadowColor = color; }
+                ctx.beginPath(); ctx.arc(0, 0, baseSize * 1.3, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.stroke();
+                ctx.save(); ctx.rotate(-time * 0.0005); ctx.beginPath(); ctx.arc(0, 0, baseSize * 1.1, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.setLineDash([2, 6]); ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore();
+                ctx.rotate(time * 0.001 * (isActive ? 2 : 0.5));
+                const r = baseSize;
+                const drawTri = (offset) => {
+                    ctx.beginPath();
+                    for(let i=0; i<3; i++) { const a = offset + (i * 120 * Math.PI/180); const tx = r * Math.cos(a); const ty = r * Math.sin(a); if(i===0) ctx.moveTo(tx, ty); else ctx.lineTo(tx, ty); }
+                    ctx.closePath(); ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+                };
+                drawTri(0); drawTri(Math.PI);
+                ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2); ctx.fillStyle = isActive ? '#fff' : color; ctx.fill(); ctx.restore();
+            },
+            spawnExplosion(x, y) {
+                for (let i = 0; i < 40; i++) {
+                    const angle = Math.random() * Math.PI * 2; const speed = Math.random() * 4 + 1;
+                    this.particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 1.0, color: Math.random() > 0.4 ? '#ffd700' : '#ffffff' });
+                }
+            },
+            drawParticles() {
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i]; p.x += p.vx; p.y += p.vy; p.life -= 0.03; p.vx *= 0.95; p.vy *= 0.95;
+                    if (p.life <= 0) { this.particles.splice(i, 1); }
+                    else {
+                        this.ctx.beginPath(); this.ctx.arc(p.x, p.y, 3 * p.life, 0, Math.PI * 2);
+                        this.ctx.fillStyle = p.color; this.ctx.globalAlpha = p.life; this.ctx.fill(); this.ctx.globalAlpha = 1.0;
+                    }
+                }
+            },
+            getRotatedPoint(pt, angle) {
+                const cx = 0.5; const cy = 0.5; const x = pt.x - cx; const y = pt.y - cy;
+                const cos = Math.cos(angle); const sin = Math.sin(angle);
+                return { x: ((x * cos - y * sin) + cx) * this.canvas.width, y: ((x * sin + y * cos) + cy) * this.canvas.height };
+            },
+            triggerUnlock() {
+                this.isLocked = true; this.isSequenceActive = true;
+                document.getElementById('guide-text').style.opacity = 0;
+                setTimeout(() => {
+                    this.isLocked = false; this.isSequenceActive = false;
+                    document.getElementById('final-text').style.opacity = 1;
+                    const overlay = document.getElementById('lock-overlay');
+                    overlay.style.opacity = 0;
+                    setTimeout(() => { overlay.style.display = 'none'; }, 2000);
+                }, 1000);
+            }
+        };
+
+        const TRANSFORM_CONFIG = {
+            isZoomedIn: false,
+            autoRotateSpeed: 0.2,
+            zoomOut: { x: 0, y: 0, z: 0, scale: 0.5568 },
+            zoomIn: { x: 0, y: 0.42, z: 3.28, scale: 1.0382 }
+        };
+
+        const SCENE_CONFIG = {
+            spawn: { x: 0.3, y: 2.53, z: 5.0 },
+            hover: { height: 5.4, radius: 4.113, centerX: 0.4, centerZ: 4.6, verticalStep: 0 },
+            fx: { stormCount: 15, stormSpeedBase: 0.08, stormSpreadRad: 1.57, bloomStrength: 0.309, bloomRadius: 0.352, bloomThreshold: 0.963 }
+        };
 
         // --- CỐT TRUYỆN 3 PHẦN ---
         const STORY_PART_1 = "Tụi mình bắt đầu bằng việc yêu xa, Ban đầu muốn gặp nhau phát điên, Đêm nhớ nhau chỉ biết call nhau ngủ, Nhớ chả thể ôm, Ngày đó chỉ mong là tụi mình có thể gần nhau hơn xíu";
