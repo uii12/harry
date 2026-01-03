@@ -150,10 +150,9 @@
 
     <div id="lock-overlay">
         <canvas id="lock-canvas"></canvas>
-        <div id="guide-text">Draw 'N' to Unlock</div>
+        <div id="guide-text">Draw 'T' to Unlock</div>
         <div id="final-text">
-            <span style="font-size: 2em; font-weight: 400; transform: scaleY(1.4); display: inline-block; transform-origin: bottom;">N</span>A YÊU
-        </div>
+           <span style="font-size: 2em; font-weight: 400;">T</span> A YÊU
     </div>
 
     <div id="vignette"></div>
@@ -181,14 +180,21 @@
         // ==========================================
         const MagicLock = {
             config: {
-                smoothFactor: 0.15, orbitSpeed: 0.0003, pulseSpeed: 2, activePulseSpeed: 5,
+                smoothFactor: 0.25, orbitSpeed: 0, pulseSpeed: 2, activePulseSpeed: 5,
                 colors: { primary: '#ffd700', dim: 'rgba(100, 100, 100, 0.4)', trailStart: 'rgba(255, 215, 0, 0)', trailEnd: 'rgba(255, 250, 220, 0.9)' }
             },
             isLocked: true,
             isSequenceActive: false,
             canvas: null, ctx: null,
             // Points for 'N' shape
-            points: [ { x: 0.35, y: 0.75 }, { x: 0.35, y: 0.25 }, { x: 0.65, y: 0.75 }, { x: 0.65, y: 0.25 } ],
+           // Points for 'T' shape
+points: [
+ { x: 0.30, y: 0.30 }, // ngang trên
+ { x: 0.70, y: 0.30 },
+ { x: 0.50, y: 0.30 }, // trụ dọc
+ { x: 0.50, y: 0.75 }
+],
+
             currentIndex: 0,
             trail: [], particles: [], connectedPairs: [],
             cursor: { x: 0, y: 0 }, target: { x: 0, y: 0 },
@@ -209,20 +215,31 @@
                 if (!this.isLocked && !this.isSequenceActive) return;
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
                 const time = Date.now();
-                const rotationAngle = time * this.config.orbitSpeed;
+                
 
                 if (landmarks && !this.isSequenceActive && this.isLocked) {
                     const indexTip = landmarks[8];
                     this.target.x = (1 - indexTip.x) * this.canvas.width;
                     this.target.y = indexTip.y * this.canvas.height;
-                    this.cursor.x += (this.target.x - this.cursor.x) * this.config.smoothFactor;
+                  const dx = this.target.x - this.cursor.x;
+const dy = this.target.y - this.cursor.y;
+const dist = Math.hypot(dx, dy);
+
+if (dist > 2) { // NGƯỠNG ĐỨNG YÊN
+    this.cursor.x += dx * this.config.smoothFactor;
+    this.cursor.y += dy * this.config.smoothFactor;
+}
                     this.cursor.y += (this.target.y - this.cursor.y) * this.config.smoothFactor;
                     this.trail.push({ x: this.cursor.x, y: this.cursor.y });
                     if (this.trail.length > 25) this.trail.shift();
                 }
 
                 this.drawTrail(); this.drawParticles();
-                const realPoints = this.points.map(pt => this.getRotatedPoint(pt, rotationAngle));
+               const realPoints = this.points.map(pt => ({
+    x: pt.x * this.canvas.width,
+    y: pt.y * this.canvas.height
+}));
+
                 this.drawConnections(realPoints);
 
                 realPoints.forEach((pos, idx) => {
@@ -325,7 +342,12 @@
         const SCENE_CONFIG = {
             spawn: { x: 0.3, y: 2.53, z: 5.0 },
             hover: { height: 5.4, radius: 4.113, centerX: 0.4, centerZ: 4.6, verticalStep: 0 },
-            fx: { stormCount: 15, stormSpeedBase: 0.08, stormSpreadRad: 1.57, bloomStrength: 0.309, bloomRadius: 0.352, bloomThreshold: 0.963 }
+            fx: { stormCount: 8,
+  stormSpeedBase: 0.05,
+  stormSpreadRad: 1.2,
+  bloomStrength: 0.18,
+  bloomRadius: 0.25,
+  bloomThreshold: 0.95 }
         };
 
         // --- CỐT TRUYỆN 3 PHẦN ---
@@ -376,7 +398,7 @@
         async function init() {
             setupScene();
             MagicLock.init(); // Khởi tạo khoá
-            createAmbientBooks(50); // Tạo sách bay nền
+            createAmbientBooks(window.innerWidth < 768 ? 20 : 40); // Tạo sách bay nền
             await setupAI();
             animate();
         }
@@ -399,7 +421,7 @@
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); 
             renderer.setSize(window.innerWidth, window.innerHeight); 
             renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.SoftShadowMap;
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
             document.body.appendChild(renderer.domElement);
 
             const renderScene = new RenderPass(scene, camera); 
@@ -659,7 +681,7 @@
         function stopLyrics() { if (lyricsInterval) clearTimeout(lyricsInterval); currentSubtitleEl.style.opacity = 0; setTimeout(() => { currentSubtitleEl.innerText = ""; }, 1000); }
 
         function createAmbientParticles() {
-            const particleCount = 350; const geometry = new THREE.BufferGeometry(); 
+            const particleCount = 180; const geometry = new THREE.BufferGeometry(); 
             const positions = []; const speeds = []; const phases = []; const colors = [];
             const colorPalette = [new THREE.Color('#ffdd99'), new THREE.Color('#ffb3b3'), new THREE.Color('#ffffff')];
             for (let i = 0; i < particleCount; i++) {
